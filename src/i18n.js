@@ -87,10 +87,35 @@ export const T = {
       en: 'The API key holds a space or an invisible character (copied with it?): paste it again, only the key.',
       fr: 'La clé d’API contient une espace ou un caractère invisible (copié avec ?) : collez-la de nouveau, la clé seule.',
     },
-    monitorsInvalid: (tokens) => ({
-      en: `These are not UptimeRobot monitor ids (digits only, e.g. 777749809): ${tokens.join(', ')}.`,
-      fr: `Ce ne sont pas des identifiants de moniteurs UptimeRobot (chiffres seulement, ex. 777749809) : ${tokens.join(', ')}.`,
+    // The entries themselves are never quoted: a key pasted in the wrong
+    // field would end up in the status.
+    monitorsInvalid: (count) => ({
+      en: `The "Monitors" field holds ${count} ${plural(count, 'entry that is not an UptimeRobot monitor id', 'entries that are not UptimeRobot monitor ids')} (digits only, e.g. 777749809). Not shown here, in case a key was pasted there: fix the field.`,
+      fr: `Le champ « Moniteurs » contient ${count} ${plural(count, 'entrée qui n’est pas un identifiant', 'entrées qui ne sont pas des identifiants')} de moniteur UptimeRobot (chiffres seulement, ex. 777749809). Non affichées ici, au cas où une clé y aurait été collée : corrigez le champ.`,
     }),
+    waitingBudget: {
+      en: 'Waiting for the request budget of the minute (10 requests a minute on the free plan, spent by the buttons): retried in 1 min.',
+      fr: 'En attente du budget de requêtes de la minute (10 requêtes par minute avec l’offre gratuite, dépensées par les boutons) : nouvel essai dans 1 min.',
+    },
+    restartWait: (delay) =>
+      join(
+        {
+          en: 'Restarted: the next reading of UptimeRobot keeps its planned time, to spare the request budget.',
+          fr: 'Redémarré : la prochaine lecture d’UptimeRobot garde son heure prévue, pour ménager le budget de requêtes.',
+        },
+        {
+          en: `Reading in ${minutes(delay)} min.`,
+          fr: `Lecture dans ${minutes(delay)} min.`,
+        },
+      ),
+    apiGone: (status, delay) =>
+      join(
+        {
+          en: `UptimeRobot answers HTTP ${status} on its API v2: it may have been retired. Update the integration.`,
+          fr: `UptimeRobot répond HTTP ${status} sur son API v2 : elle a peut-être été retirée. Mettez à jour l’intégration.`,
+        },
+        RETRY(delay),
+      ),
     tooManyIds: {
       en: 'At most 50 monitor ids in the configuration: remove some, or leave it empty to follow every monitor.',
       fr: 'Au plus 50 identifiants de moniteurs dans la configuration : retirez-en, ou laissez vide pour suivre tous les moniteurs.',
@@ -139,6 +164,10 @@ export const T = {
     unknownMonitor:
       'This monitor is not followed (not read yet, or left out of the configuration): nothing was sent',
     busy: 'UptimeRobot asked Gladys to slow down: nothing was sent, try again later',
+    busyRefused: (delay) =>
+      `UptimeRobot refused the command (HTTP 429, too many requests): not done, every request paused ${minutes(delay)} min`,
+    testBudget:
+      'The request budget of the minute is spent (10 requests a minute on the free plan): Gladys reads UptimeRobot again in 1 min, press the button again after',
     limited:
       'Too many requests to UptimeRobot this minute (10 a minute on the free plan): nothing was sent, try again in a minute',
     tooSlow:

@@ -99,16 +99,28 @@ moniteurs en pause.
 - Décocher l'option prend effet tout de suite ; les boutons restent sur les
   appareils (pour ne jamais casser l'historique) mais sont refusés.
 - Quand la commande ne peut pas partir en 3,5 s, rien n'est envoyé. Une
-  commande partie sans réponse à temps s'affiche « envoyée, sans
-  confirmation » (jamais « non envoyée ») : la lecture suivante montre le
-  résultat.
+  commande partie sans réponse à temps (ou avec une erreur serveur) s'affiche
+  en échec avec le message « The command was sent but UptimeRobot did not
+  confirm it » (jamais « nothing was sent ») : la lecture suivante montre le
+  résultat. Les messages des commandes sont en anglais, comme ceux du cœur.
+- Un refus « trop de requêtes » (HTTP 429) s'affiche « UptimeRobot refused
+  the command (HTTP 429, too many requests): not done » : la commande n'a pas
+  été faite, et toutes les requêtes s'arrêtent pendant la pause indiquée.
 
 ## Limites d'usage et problèmes de connexion
 
 - L'offre gratuite d'UptimeRobot admet **10 requêtes par minute**
   (documentation de l'API). Gladys en envoie **8 au plus** par minute, toutes
   requêtes comptées (lectures et boutons) : au-delà, un bouton est refusé sans
-  rien envoyer, et la lecture attend une minute.
+  rien envoyer (« Too many requests to UptimeRobot this minute »), et la
+  lecture attend une minute (état « En attente du budget de requêtes de la
+  minute », ou le message propre du bouton **Tester la connexion**).
+- **Redémarrage** : la prochaine lecture garde son heure prévue (au plus un
+  intervalle plus tard), pour ne jamais dépasser la limite en cas de
+  redémarrages répétés ; **Tester la connexion** lit tout de suite.
+- **API v2 retirée** (HTTP 404 ou 410) : l'état le dit (« elle a peut-être été
+  retirée. Mettez à jour l'intégration. ») ; Gladys réessaie de plus en plus
+  espacé.
 - **Clé refusée** : Gladys ne réessaie pas seul, même après un redémarrage.
   Collez la clé et enregistrez, ou appuyez sur **Tester la connexion**.
 - **UptimeRobot surchargé** (HTTP 429) ou **erreur serveur** (HTTP 5xx) :

@@ -22,5 +22,8 @@ the notes of the version's GitHub Release.
 - A request budget of 8 per minute (free plan: 10); HTTP 429 and 5xx pauses
   kept across restarts; a refused key is never retried alone.
 - Button "Test the connection"; documentation in English and French.
+- The next reading keeps its planned time across a reconnection to Gladys
+  and a restart; clear statuses when the request budget is spent and when
+  the API v2 answers 404 / 410.
 
 [Unreleased]: https://github.com/LM1LC3N7/gladys-uptimerobot/commits/main

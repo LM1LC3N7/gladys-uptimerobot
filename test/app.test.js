@@ -323,7 +323,8 @@ test('the monitor filter, an id absent from the account, an invalid id', async (
   assert.equal(ctx.api.requests[0].params.monitors, '102-999');
   assert.match(ctx.gladys.fake.connectionStatus.message.en, /Not found in the account: 999/);
   const bad = await setup({ config: { monitors: '101, abc' } });
-  assert.match(bad.gladys.fake.connectionStatus.message.en, /not UptimeRobot monitor ids.*abc/);
+  assert.match(bad.gladys.fake.connectionStatus.message.en, /1 entry that is not an UptimeRobot/);
+  assert.ok(!JSON.stringify(bad.gladys.fake.connectionStatus).includes('abc'), 'never quoted');
   assert.equal(bad.api.requests.length, 0);
 });
 
@@ -500,7 +501,13 @@ test('a 429 on a command pauses every path', async () => {
   const device = withButtons(SITE);
   ctx.api.failures.push({ method: 'editMonitor', status: 429 });
   const ack = await ctx.gladys.fake.setValue(device, feature(device, 'pause'), 1);
-  assert.match(ack.error, /slow down/);
+  assert.match(ack.error, /refused the command \(HTTP 429, too many requests\): not done/);
+  assert.doesNotMatch(ack.error, /nothing was sent/);
+  // The status follows without holding the ack.
+  for (let i = 0; i < 5; i += 1) {
+    await ctx.app.store.settled();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
   assert.match(ctx.gladys.fake.connectionStatus.message.en, /HTTP 429/);
   const next = await ctx.gladys.fake.setValue(device, feature(device, 'pause'), 1);
   assert.match(next.error, /slow down/);

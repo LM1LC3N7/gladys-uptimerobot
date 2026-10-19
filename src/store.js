@@ -73,6 +73,11 @@ export class Store {
     return salt;
   }
 
+  /** Resolves once every write queued so far is on disk (or given up). */
+  settled() {
+    return this.#writes;
+  }
+
   #save() {
     const write = this.#writes.then(() => this.#write());
     this.#writes = write.catch(() => {});

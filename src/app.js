@@ -10,8 +10,10 @@
 //                  nor after a long gap)
 //   setValue       the Pause / Resume buttons, off by default
 //
-// The loop is one chain of timers: halt() bumps an epoch, and a run of an
-// older epoch never schedules itself again. An API key UptimeRobot refused is
+// The loop is ONE timer (plan() replaces it, synchronously): two paths
+// failing together never leave two chains; halt() bumps an epoch, and a run
+// of an older epoch never plans again. The next reading time is kept across
+// a reconnection and, bounded, across a restart. An API key UptimeRobot refused is
 // final: the loop stops and the status says what to fix; nothing is sent
 // again until the configuration is saved or "Test the connection" is pressed.
 // A failure is never read again faster than the interval; HTTP 429 and 5xx
@@ -47,7 +49,7 @@ import {
 import { T } from './i18n.js';
 import { Store } from './store.js';
 import { UptimeRobotClient } from './uptimerobot/client.js';
-import { CODES, isBusy, isKeyRefused, isServerError } from './uptimerobot/errors.js';
+import { CODES, isApiGone, isBusy, isKeyRefused, isServerError } from './uptimerobot/errors.js';
 import { httpRequest } from './uptimerobot/http.js';
 
 /** The "Test the connection" button waits 30 s: answer before. */
@@ -100,6 +102,8 @@ export class UptimeRobotApp {
     /** The timers of the loop (cleared by halt()). */
     this.handles = new Set();
     this.flushHandle = null;
+    /** The one timer of the reading chain (see plan()). */
+    this.loopHandle = null;
     this.queue = Promise.resolve();
     /** One chain of commands per monitor. */
     this.chains = new Map();
@@ -113,7 +117,15 @@ export class UptimeRobotApp {
     this.online = false;
     this.blocked = false;
     this.pausedUntil = 0;
+    /** Why: 'busy' (429) or 'server:<status>' (5xx), kept in /data with the end. */
+    this.pauseReason = null;
     this.retryDelay = 0;
+    /** When the reading chain runs next (0: nothing planned). */
+    this.nextRunAt = 0;
+    /** The last run found no room in the request budget. */
+    this.waitingBudget = false;
+    /** id -> bumped by every command that changed the state shown (see readAll). */
+    this.commandVersions = new Map();
     /** id -> monitor (src/uptimerobot/parse.js) of the last reading. */
     this.monitors = new Map();
     /** Ids of the configuration absent from the account. */
@@ -194,22 +206,21 @@ export class UptimeRobotApp {
     });
   }
 
-  /** The timers of the loop stopped (a reconnection): start them again, as they were. */
+  /**
+   * The timers of the loop stopped (a reconnection): start them again AS
+   * PLANNED. The next reading keeps its time (a reconnection every 4 min
+   * never starves a 5 min loop).
+   */
   async resume() {
     this.halt();
-    const generation = this.generation;
     if (this.blocked || !this.client) return;
     if (this.paused()) {
-      this.schedule(this.pausedUntil - this.now(), () => this.connect(generation));
-    } else if (this.online) {
-      this.scheduleLoop(generation);
-    } else if (this.retryDelay === 0) {
-      // Nothing has succeeded yet (a first reading cut short): read at once.
-      await this.connect(generation);
+      this.plan(this.pausedUntil - this.now());
+    } else if (this.nextRunAt > 0) {
+      this.plan(Math.max(0, this.nextRunAt - this.now()));
     } else {
-      this.schedule(Math.max(this.config.intervalMs, this.retryDelay), () =>
-        this.connect(generation),
-      );
+      // Nothing planned yet (a first reading cut short): read at once.
+      await this.tick(this.generation);
     }
   }
 
@@ -232,6 +243,29 @@ export class UptimeRobotApp {
     for (const handle of this.handles) this.timers.clearTimeout(handle);
     this.handles.clear();
     this.flushHandle = null;
+    this.loopHandle = null;
+  }
+
+  /**
+   * The ONE timer of the reading chain: any earlier one is replaced, so two
+   * paths (a reading and a command failing together) can never leave two
+   * chains. Synchronous. The time is kept (resume()) and persisted, bounded,
+   * for a restart (run()).
+   */
+  plan(delay) {
+    const generation = this.generation;
+    if (this.loopHandle !== null) {
+      this.timers.clearTimeout(this.loopHandle);
+      this.handles.delete(this.loopHandle);
+    }
+    const wait = Math.max(0, delay);
+    this.nextRunAt = this.now() + wait;
+    const handle = this.schedule(wait, () => {
+      if (this.loopHandle === handle) this.loopHandle = null;
+      return this.tick(generation);
+    });
+    this.loopHandle = handle;
+    this.store.set('meta', 'nextReadAt', String(this.nextRunAt)).catch(() => {});
   }
 
   dropClient() {
@@ -257,7 +291,7 @@ export class UptimeRobotApp {
       await this.setStatus(false, T.status.keyInvalid);
       return;
     }
-    if (config.filter?.invalid.length > 0) {
+    if (config.filter?.invalid > 0) {
       await this.setStatus(false, T.status.monitorsInvalid(config.filter.invalid));
       return;
     }
@@ -285,15 +319,37 @@ export class UptimeRobotApp {
     // read back is capped (a clock or a file gone wrong never blocks for long).
     const stored = Number(this.store.get('meta', 'pausedUntil')) || 0;
     const pausedUntil = Math.min(stored, this.now() + INTERVALS.BUSY_MAX_MS);
-    if (force && stored) await this.store.set('meta', 'pausedUntil', null);
+    if (force && stored) {
+      await this.store.set('meta', 'pausedUntil', null);
+      await this.store.set('meta', 'pauseReason', null);
+    }
     if (!force && this.now() < pausedUntil) {
       this.pausedUntil = pausedUntil;
+      this.pauseReason = this.store.get('meta', 'pauseReason');
       const delay = pausedUntil - this.now();
-      await this.setStatus(false, T.status.busy(delay));
-      this.schedule(delay, () => this.connect(generation));
+      await this.setStatus(false, this.pauseMessage(delay));
+      this.plan(delay);
       return;
     }
-    await this.connect(generation);
+    // A restart (or a crash loop) never reads sooner than planned: the next
+    // reading time is kept in /data, capped at one interval from now.
+    const nextReadAt = Math.min(
+      Number(this.store.get('meta', 'nextReadAt')) || 0,
+      this.now() + config.intervalMs,
+    );
+    if (!force && nextReadAt > this.now()) {
+      const delay = nextReadAt - this.now();
+      await this.setStatus(false, T.status.restartWait(delay));
+      this.plan(delay);
+      return;
+    }
+    await this.tick(generation);
+  }
+
+  /** The status of a pause, by its reason (kept in /data with it). */
+  pauseMessage(delay) {
+    const server = /^server:(\d{3})$/.exec(this.pauseReason ?? '');
+    return server ? T.status.serverError(Number(server[1]), delay) : T.status.busy(delay);
   }
 
   schedule(delay, task) {
@@ -314,32 +370,52 @@ export class UptimeRobotApp {
     return generation === this.generation && epoch === this.epoch && !this.blocked;
   }
 
-  /** First reading, then the loop. Never throws. */
-  async connect(generation) {
-    if (!this.client || generation !== this.generation) return;
+  /**
+   * One run of the reading chain: a reading, then the next one planned.
+   * Never throws. A failure seen by a run whose epoch moved (another path
+   * already failed and planned) only records its pause.
+   */
+  async tick(generation) {
+    if (!this.client || generation !== this.generation || this.blocked) return;
     if (this.paused()) {
       // A timer may fire a little early, or a longer pause came meanwhile.
-      this.schedule(Math.max(1_000, this.pausedUntil - this.now()), () => this.connect(generation));
+      this.plan(Math.max(1_000, this.pausedUntil - this.now()));
       return;
     }
     if (!this.roomForReading()) {
-      // The commands spent the request budget of the minute: wait for it.
-      this.schedule(MINUTE, () => this.connect(generation));
+      // The buttons spent the request budget of the minute: wait for it.
+      this.waitingBudget = true;
+      this.plan(MINUTE);
+      if (!this.online) await this.setStatus(false, T.status.waitingBudget);
       return;
     }
+    this.waitingBudget = false;
     const epoch = this.epoch;
+    const wasOnline = this.online;
     let applied;
     try {
-      applied = await this.readAll({ publish: true });
+      applied = await this.readAll({ publish: !wasOnline });
     } catch (err) {
+      if (epoch !== this.epoch || generation !== this.generation) {
+        await this.notePause(err, this.delayFor(err));
+        return;
+      }
+      if (err.code === CODES.LIMITED) {
+        // The budget ran out between two pages (a button meanwhile): not a
+        // failure of UptimeRobot, the reading waits a minute.
+        this.waitingBudget = true;
+        this.plan(MINUTE);
+        if (!this.online) await this.setStatus(false, T.status.waitingBudget);
+        return;
+      }
       await this.failed(err, generation);
       return;
     }
     // Not applied: a pause, a new configuration or a halt came meanwhile,
-    // and whoever did it scheduled what follows.
+    // and whoever did it planned what follows.
     if (!applied || !this.current(generation, epoch)) return;
-    this.logger.info(`UptimeRobot answers: ${this.monitors.size} monitor(s)`);
-    this.scheduleLoop(generation);
+    if (!wasOnline) this.logger.info(`UptimeRobot answers: ${this.monitors.size} monitor(s)`);
+    this.plan(this.config.intervalMs);
   }
 
   roomForReading() {
@@ -347,33 +423,12 @@ export class UptimeRobotApp {
     return this.limiter.remaining() >= UptimeRobotClient.pagesFor(ids);
   }
 
-  scheduleLoop(generation, delay = this.config.intervalMs) {
-    const epoch = this.epoch;
-    this.schedule(delay, () => this.loop(generation, epoch));
-  }
-
-  async loop(generation, epoch) {
-    if (!this.current(generation, epoch)) return;
-    if (this.paused() || !this.roomForReading()) {
-      this.scheduleLoop(generation, Math.max(MINUTE, this.pausedUntil - this.now()));
-      return;
-    }
-    try {
-      await this.readAll({ publish: false });
-    } catch (err) {
-      if (this.current(generation, epoch)) await this.failed(err, generation);
-      return;
-    }
-    if (this.current(generation, epoch)) this.scheduleLoop(generation);
-  }
-
-  /** A reading failed: final refusal, or retry (never faster than the interval). */
-  async failed(err, generation) {
+  /** The wait after a failure: never shorter than the interval. */
+  delayFor(err) {
     const interval = this.config.intervalMs;
-    let delay;
     if (isBusy(err)) {
       // Too many requests: a bounded pause of every path (loop, commands).
-      delay = Math.max(
+      return Math.max(
         interval,
         clamp(
           err.retryAfterMs ?? INTERVALS.BUSY_MIN_MS,
@@ -381,25 +436,58 @@ export class UptimeRobotApp {
           INTERVALS.BUSY_MAX_MS,
         ),
       );
-    } else {
-      delay = Math.max(interval, this.retryDelay);
-      if (isServerError(err) && err.retryAfterMs) {
-        delay = clamp(err.retryAfterMs, delay, INTERVALS.BUSY_MAX_MS);
-      }
     }
-    // A pause holds whatever the generation (a new configuration does not
-    // make UptimeRobot less busy); kept in /data.
-    if (isBusy(err) || isServerError(err)) {
-      this.pausedUntil = Math.max(this.pausedUntil, this.now() + delay);
-      await this.store.set('meta', 'pausedUntil', String(this.pausedUntil));
+    const delay = Math.max(interval, this.retryDelay);
+    if (isServerError(err) && err.retryAfterMs) {
+      return clamp(err.retryAfterMs, delay, INTERVALS.BUSY_MAX_MS);
     }
-    if (generation !== this.generation) return;
+    return delay;
+  }
+
+  /**
+   * HTTP 429 or 5xx: the pause of every path, set SYNCHRONOUSLY (a command
+   * or a reading starting right after sees it), then kept in /data with its
+   * reason. A pause holds whatever the generation (a new configuration does
+   * not make UptimeRobot less busy).
+   */
+  notePause(err, delay) {
+    if (!isBusy(err) && !isServerError(err)) return Promise.resolve();
+    this.pausedUntil = Math.max(this.pausedUntil, this.now() + delay);
+    this.pauseReason = isBusy(err) ? 'busy' : `server:${err.status}`;
+    return Promise.all([
+      this.store.set('meta', 'pausedUntil', String(this.pausedUntil)),
+      this.store.set('meta', 'pauseReason', this.pauseReason),
+    ]);
+  }
+
+  /**
+   * A request failed: final refusal, or retry (never faster than the
+   * interval). Everything that decides the next run happens BEFORE the
+   * first await: two failures at once leave one chain (plan() replaces).
+   */
+  async failed(err, generation) {
+    const interval = this.config.intervalMs;
+    const delay = this.delayFor(err);
+    const pausing = this.notePause(err, delay);
+    if (generation !== this.generation) {
+      await pausing;
+      return;
+    }
     const wasOnline = this.online;
     this.online = false;
     this.halt();
-    await this.publishTransports();
-    if (isKeyRefused(err)) {
+    const refused = isKeyRefused(err);
+    if (refused) {
       this.blocked = true;
+    } else {
+      if (!isBusy(err)) {
+        this.retryDelay = Math.min(delay * 2, Math.max(interval, INTERVALS.RETRY_MAX_MS));
+      }
+      this.plan(delay);
+    }
+    await pausing;
+    await this.publishTransports();
+    if (refused) {
       await this.store.set('refusals', 'key', await this.refusalKey(this.config));
       this.logger.warn(
         `API key refused by UptimeRobot (${err.message}): not retried until changed`,
@@ -407,19 +495,16 @@ export class UptimeRobotApp {
       await this.setStatus(false, T.status.keyRefused);
       return;
     }
-    if (!isBusy(err)) {
-      this.retryDelay = Math.min(delay * 2, Math.max(interval, INTERVALS.RETRY_MAX_MS));
-    }
     if (wasOnline || delay === interval) {
       this.logger.warn(`UptimeRobot fails: ${err.message}`);
     }
     await this.setStatus(false, this.errorMessage(err, delay));
-    this.schedule(delay, () => this.connect(generation));
   }
 
   errorMessage(err, delay) {
     if (isBusy(err)) return T.status.busy(delay);
     if (isServerError(err)) return T.status.serverError(err.status, delay);
+    if (isApiGone(err)) return T.status.apiGone(err.status, delay);
     return T.status.unreachable(err, delay);
   }
 
@@ -459,15 +544,23 @@ export class UptimeRobotApp {
       epoch !== this.epoch;
     if (!client || stale()) return false;
     const filter = this.config.filter;
+    const versions = new Map(this.commandVersions);
     const { monitors, total } = await client.monitors({ ids: filter?.ids });
     if (stale()) return false;
     const now = this.now();
 
+    // A command answered while this reading was in flight: its state (paused,
+    // not checked) stays until the next reading, never overwritten by an
+    // answer older than the command.
+    const crossed = (m) => (this.commandVersions.get(m.id) ?? 0) !== (versions.get(m.id) ?? 0);
+    const fresh = monitors.map((m) =>
+      crossed(m) && this.monitors.has(m.id) ? { ...m, status: this.monitors.get(m.id).status } : m,
+    );
     // The cap keeps the monitors already created first.
     const created = new Set(createdMonitors(this.gladys).map((c) => c.monitorId));
     const followed = [
-      ...monitors.filter((m) => created.has(m.id)),
-      ...monitors.filter((m) => !created.has(m.id)),
+      ...fresh.filter((m) => created.has(m.id)),
+      ...fresh.filter((m) => !created.has(m.id)),
     ].slice(0, LIMITS.MONITORS);
     const events = this.transitions(followed, now);
 
@@ -718,9 +811,11 @@ export class UptimeRobotApp {
       });
     } catch (err) {
       if (isBusy(err)) {
-        // Refused without being done: every path pauses.
-        await this.failed(err, generation);
-        throw new Error(T.errors.busy, { cause: err });
+        // Refused without being done: every path pauses. failed() sets the
+        // pause before its first await; the ack never waits for Gladys.
+        this.failed(err, generation).catch((e) => this.logger.warn(`Pause: ${e.message}`));
+        const delay = Math.max(0, this.pausedUntil - this.now());
+        throw new Error(T.errors.busyRefused(delay), { cause: err });
       }
       if (err.code === CODES.LIMITED) throw new Error(T.errors.limited, { cause: err });
       if (err.notSent || !sent) throw new Error(T.errors.notSent(err), { cause: err });
@@ -730,10 +825,18 @@ export class UptimeRobotApp {
       if (err.code === CODES.API || (err.code === CODES.HTTP && err.status < 500)) {
         throw new Error(T.errors.refused(err), { cause: err });
       }
+      if (isServerError(err)) {
+        // The same bounded pause as a reading (Retry-After included), kept
+        // in /data; the command itself may have been done.
+        this.failed(err, generation).catch((e) => this.logger.warn(`Pause: ${e.message}`));
+      }
       throw new Error(T.errors.unconfirmed(err), { cause: err });
     }
     this.logger.info(`Monitor ${monitorId} ${pause ? 'paused' : 'resumed'}`);
-    await this.observed(generation, monitorId, pause);
+    // Published without holding the ack (Gladys waits 5 s for it).
+    this.observed(generation, monitorId, pause).catch((err) =>
+      this.logger.warn(`State not published: ${err.message}`),
+    );
   }
 
   /**
@@ -750,6 +853,8 @@ export class UptimeRobotApp {
       status: pause ? API_STATUS.PAUSED : API_STATUS.NOT_CHECKED,
     });
     this.confirmed.delete(monitorId);
+    // A reading already in flight keeps this state (readAll).
+    this.commandVersions.set(monitorId, (this.commandVersions.get(monitorId) ?? 0) + 1);
     const created = createdMonitors(this.gladys).find((c) => c.monitorId === monitorId);
     if (created) await this.publishStates(this.statesOf(created));
   }
@@ -791,8 +896,10 @@ export class UptimeRobotApp {
       T.errors.testTooLong,
     );
     if (!this.online) {
-      const message = this.wantedStatus ? this.wantedStatus[1] : null;
-      throw new Error(message?.en ?? T.errors.notConnected);
+      if (this.waitingBudget) throw new Error(T.errors.testBudget);
+      // Only a status that says what failed: never an older "answers" one.
+      const wanted = this.wantedStatus;
+      throw new Error(wanted && wanted[0] === false ? wanted[1].en : T.errors.notConnected);
     }
     return T.test.ok({ monitors: this.monitors.size });
   }

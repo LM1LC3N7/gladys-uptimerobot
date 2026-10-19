@@ -25,6 +25,20 @@ up to date at the end of every milestone.
       Tested with unit tests against the SDK's fake Gladys, a fake UptimeRobot
       in memory and loopback HTTP servers. **Never tested with a real
       UptimeRobot account.** No Docker on this PC: no e2e test in a container.
+- [x] **Review corrections** (2026-10-19), one non-regression test each in
+      `test/review.test.js` (virtual time, the reviewer's scenarios S1-S9):
+      one timer for the reading chain, set before any await (B1); the ack of
+      a command never waits for Gladys, a 429 pauses synchronously (I1); a
+      5xx on `editMonitor` pauses like a reading, persisted, "not confirmed"
+      (I2); a reconnection keeps the planned reading time (I3); the budget
+      spent between two pages waits a minute, still online (M1); a status and
+      a button message of their own when the budget is spent (M2); a 429 on
+      a command says "not done" with the pause (M3); invalid entries of
+      "Monitors" are counted, never quoted (M4); `nextReadAt` persisted,
+      bounded, kept at a restart unless forced (M5); the reason of a pause
+      persisted (M6); docs quote the real texts (M7); a reading begun before
+      a command keeps the command's state (M8); 404 / 410 on v2 give "API v2
+      may have been retired, update the integration" (M9).
 - [ ] **Milestone 2 — real account** (a tester with UptimeRobot): record real
       answers as fixtures (key removed), fix what differs. To check first:
   - the answer to a wrong key (`stat: fail`, which `error.type`? HTTP 200 or
@@ -139,6 +153,14 @@ up to date at the end of every milestone.
   sent". Not a physical risk: no fresh read before acting (it would cost a
   request of the 10 per minute); pause and resume are idempotent. After
   success the status shows `paused` / `not_checked` until the next reading.
+- **Scheduling** (review B1, I3, M5): the reading chain has one timer,
+  `loopHandle`, replaced by `plan()`; `failed()` halts and plans before its
+  first await; a run whose epoch moved only records its pause. `nextRunAt`
+  survives a reconnection (`resume()` plans `max(0, nextRunAt - now)`) and is
+  persisted as `meta.nextReadAt`, capped at one interval when read back; a
+  non-forced start waits for it (status "Restarted: ... Reading in N min").
+- **Pause reason** (M6): `meta.pauseReason` = `busy` or `server:<status>`,
+  so a restart during a pause shows the right status.
 - **Rate of states**: change-only (own cache + `publishChangedStates`), a
   sliding window under 250/min; what does not fit is sent again a minute
   later (no extra request). Badges `cloud` / `unreachable`.

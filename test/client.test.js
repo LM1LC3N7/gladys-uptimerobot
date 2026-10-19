@@ -170,7 +170,7 @@ test('the configuration', () => {
   assert.equal(normalizeConfig({ allow_pause_resume: 'yes' }).allowPauseResume, false);
   assert.deepEqual(parseMonitorFilter('1, 2;3 4-5 1'), {
     ids: ['1', '2', '3', '4', '5'],
-    invalid: [],
+    invalid: 0,
     tooMany: false,
   });
   assert.equal(

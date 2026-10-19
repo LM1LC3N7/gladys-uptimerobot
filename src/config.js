@@ -22,7 +22,9 @@ const bool = (value, fallback) => {
 
 /**
  * The monitors to follow: ids separated by commas, semicolons, dashes or
- * spaces. Empty: all of them. -> { ids: [...], invalid: [tokens], tooMany } or null.
+ * spaces. Empty: all of them. -> { ids: [...], invalid: count, tooMany } or null.
+ * The invalid entries are only counted, never kept: a key pasted in this
+ * field must never reach a status or a log.
  */
 export function parseMonitorFilter(value) {
   const tokens = text(value)
@@ -33,7 +35,7 @@ export function parseMonitorFilter(value) {
   const ids = [...new Set(tokens.filter((t) => MONITOR_ID_PATTERN.test(t)))];
   return {
     ids: ids.slice(0, LIMITS.FILTER_IDS),
-    invalid: tokens.filter((t) => !MONITOR_ID_PATTERN.test(t)).slice(0, 10),
+    invalid: tokens.filter((t) => !MONITOR_ID_PATTERN.test(t)).length,
     tooMany: ids.length > LIMITS.FILTER_IDS,
   };
 }

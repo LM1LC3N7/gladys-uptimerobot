@@ -47,3 +47,6 @@ export const isKeyRefused = (err) =>
 /** Too many requests: a pause kept across restarts. */
 export const isBusy = (err) => err?.code === CODES.HTTP && err.status === 429;
 export const isServerError = (err) => err?.code === CODES.HTTP && err.status >= 500;
+/** 404 / 410 on a v2 method: the API v2 may have been retired (still retried, slowly). */
+export const isApiGone = (err) =>
+  err?.code === CODES.HTTP && (err.status === 404 || err.status === 410);

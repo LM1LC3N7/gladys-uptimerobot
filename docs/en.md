@@ -91,15 +91,26 @@ off" can pause your monitors.
 - Unticking the option takes effect at once; the buttons stay on the devices
   (never breaking the history) but are refused.
 - When the command cannot leave within 3.5 s, nothing is sent. A command sent
-  without an answer in time shows "sent, not confirmed" (never "not sent"):
+  without an answer in time (or with a server error) fails with "The command
+  was sent but UptimeRobot did not confirm it" (never "nothing was sent"):
   the next reading shows the result.
+- A "too many requests" refusal (HTTP 429) shows "UptimeRobot refused the
+  command (HTTP 429, too many requests): not done": the command was not
+  done, and every request stops for the pause given.
 
 ## Usage limits and connection problems
 
 - The free plan of UptimeRobot admits **10 requests per minute** (API
   documentation). Gladys sends **8 at most** per minute, every request counted
   (readings and buttons): beyond, a button is refused without sending
-  anything, and the reading waits a minute.
+  anything ("Too many requests to UptimeRobot this minute"), and the reading
+  waits a minute (status "Waiting for the request budget of the minute", or
+  a message of its own for **Test the connection**).
+- **Restart**: the next reading keeps its planned time (one interval later at
+  most), so repeated restarts never exceed the limit; **Test the connection**
+  reads at once.
+- **API v2 retired** (HTTP 404 or 410): the status says so ("it may have been
+  retired. Update the integration."); Gladys retries less and less often.
 - **Key refused**: Gladys does not try again by itself, even after a restart.
   Paste the key and save, or press **Test the connection**.
 - **UptimeRobot overloaded** (HTTP 429) or **server error** (HTTP 5xx): every
