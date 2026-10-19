@@ -106,9 +106,11 @@ off" can pause your monitors.
   anything ("Too many requests to UptimeRobot this minute"), and the reading
   waits a minute (status "Waiting for the request budget of the minute", or
   a message of its own for **Test the connection**).
-- **Restart**: the next reading keeps its planned time (one interval later at
-  most), so repeated restarts never exceed the limit; **Test the connection**
-  reads at once.
+- **Restart**: after a successful reading, Gladys reads again at once, but
+  never within a minute of the last request (restarts in a loop never exceed
+  the limit). After a failure, a pause or a spent budget, the planned wait is
+  kept (one interval at most); the status says so ("Restarted: … Reading in N
+  min."). **Test the connection** reads at once.
 - **API v2 retired** (HTTP 404 or 410): the status says so ("it may have been
   retired. Update the integration."); Gladys retries less and less often.
 - **Key refused**: Gladys does not try again by itself, even after a restart.

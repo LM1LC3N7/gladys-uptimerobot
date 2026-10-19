@@ -115,9 +115,12 @@ moniteurs en pause.
   rien envoyer (« Too many requests to UptimeRobot this minute »), et la
   lecture attend une minute (état « En attente du budget de requêtes de la
   minute », ou le message propre du bouton **Tester la connexion**).
-- **Redémarrage** : la prochaine lecture garde son heure prévue (au plus un
-  intervalle plus tard), pour ne jamais dépasser la limite en cas de
-  redémarrages répétés ; **Tester la connexion** lit tout de suite.
+- **Redémarrage** : après une lecture réussie, Gladys relit tout de suite,
+  mais jamais moins d'une minute après la dernière requête (des redémarrages
+  en boucle ne dépassent pas la limite). Après un échec, une pause ou un
+  budget épuisé, l'attente prévue est gardée (au plus un intervalle) ; l'état
+  l'indique (« Redémarré : … Lecture dans N min. »). **Tester la connexion**
+  lit tout de suite.
 - **API v2 retirée** (HTTP 404 ou 410) : l'état le dit (« elle a peut-être été
   retirée. Mettez à jour l'intégration. ») ; Gladys réessaie de plus en plus
   espacé.

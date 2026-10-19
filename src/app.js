@@ -104,6 +104,8 @@ export class UptimeRobotApp {
     this.flushHandle = null;
     /** The one timer of the reading chain (see plan()). */
     this.loopHandle = null;
+    /** The reading running now: { generation } or null (see resume()). */
+    this.inFlight = null;
     this.queue = Promise.resolve();
     /** One chain of commands per monitor. */
     this.chains = new Map();
@@ -212,10 +214,18 @@ export class UptimeRobotApp {
    * never starves a 5 min loop).
    */
   async resume() {
+    // A reading in flight of this generation finishes and plans the next
+    // one itself: never made stale (its request is already counted).
+    if (this.inFlight && this.inFlight.generation === this.generation && !this.blocked) return;
+    const crossed = this.inFlight !== null;
     this.halt();
     if (this.blocked || !this.client) return;
     if (this.paused()) {
       this.plan(this.pausedUntil - this.now());
+    } else if (crossed) {
+      // A reading of an older generation was in flight: the next one a
+      // minute later, not at once.
+      this.plan(MINUTE);
     } else if (this.nextRunAt > 0) {
       this.plan(Math.max(0, this.nextRunAt - this.now()));
     } else {
@@ -249,10 +259,12 @@ export class UptimeRobotApp {
   /**
    * The ONE timer of the reading chain: any earlier one is replaced, so two
    * paths (a reading and a command failing together) can never leave two
-   * chains. Synchronous. The time is kept (resume()) and persisted, bounded,
-   * for a restart (run()).
+   * chains. Synchronous. The time is kept (resume()). `persist`: a wait
+   * after a failure, a pause or a spent budget, kept in /data for a restart
+   * (run()); the plan after a successful reading clears it (a restart then
+   * reads at once, a minute after the last request at the latest).
    */
-  plan(delay) {
+  plan(delay, { persist = false } = {}) {
     const generation = this.generation;
     if (this.loopHandle !== null) {
       this.timers.clearTimeout(this.loopHandle);
@@ -265,7 +277,10 @@ export class UptimeRobotApp {
       return this.tick(generation);
     });
     this.loopHandle = handle;
-    this.store.set('meta', 'nextReadAt', String(this.nextRunAt)).catch(() => {});
+    const value = persist ? String(this.nextRunAt) : null;
+    if (this.store.get('meta', 'nextReadAt') !== value) {
+      this.store.set('meta', 'nextReadAt', value).catch(() => {});
+    }
   }
 
   dropClient() {
@@ -328,19 +343,24 @@ export class UptimeRobotApp {
       this.pauseReason = this.store.get('meta', 'pauseReason');
       const delay = pausedUntil - this.now();
       await this.setStatus(false, this.pauseMessage(delay));
-      this.plan(delay);
+      this.plan(delay, { persist: true });
       return;
     }
-    // A restart (or a crash loop) never reads sooner than planned: the next
-    // reading time is kept in /data, capped at one interval from now.
+    // A restart after a failure or a spent budget keeps the wait planned
+    // (capped at one interval); after a successful reading nothing is kept
+    // and it reads at once, but never within a minute of the last request
+    // (a crash loop never exceeds the limit).
+    const now = this.now();
     const nextReadAt = Math.min(
       Number(this.store.get('meta', 'nextReadAt')) || 0,
-      this.now() + config.intervalMs,
+      now + config.intervalMs,
     );
-    if (!force && nextReadAt > this.now()) {
-      const delay = nextReadAt - this.now();
+    const lastRequestAt = Math.min(Number(this.store.get('meta', 'lastRequestAt')) || 0, now);
+    const waitUntil = Math.max(nextReadAt, lastRequestAt + MINUTE);
+    if (!force && waitUntil > now) {
+      const delay = waitUntil - now;
       await this.setStatus(false, T.status.restartWait(delay));
-      this.plan(delay);
+      this.plan(delay, { persist: nextReadAt > now });
       return;
     }
     await this.tick(generation);
@@ -379,23 +399,27 @@ export class UptimeRobotApp {
     if (!this.client || generation !== this.generation || this.blocked) return;
     if (this.paused()) {
       // A timer may fire a little early, or a longer pause came meanwhile.
-      this.plan(Math.max(1_000, this.pausedUntil - this.now()));
+      this.plan(Math.max(1_000, this.pausedUntil - this.now()), { persist: true });
       return;
     }
     if (!this.roomForReading()) {
       // The buttons spent the request budget of the minute: wait for it.
       this.waitingBudget = true;
-      this.plan(MINUTE);
+      this.plan(MINUTE, { persist: true });
       if (!this.online) await this.setStatus(false, T.status.waitingBudget);
       return;
     }
     this.waitingBudget = false;
     const epoch = this.epoch;
     const wasOnline = this.online;
+    const inFlight = { generation };
+    this.inFlight = inFlight;
+    this.store.set('meta', 'lastRequestAt', String(this.now())).catch(() => {});
     let applied;
     try {
       applied = await this.readAll({ publish: !wasOnline });
     } catch (err) {
+      if (this.inFlight === inFlight) this.inFlight = null;
       if (epoch !== this.epoch || generation !== this.generation) {
         await this.notePause(err, this.delayFor(err));
         return;
@@ -404,13 +428,14 @@ export class UptimeRobotApp {
         // The budget ran out between two pages (a button meanwhile): not a
         // failure of UptimeRobot, the reading waits a minute.
         this.waitingBudget = true;
-        this.plan(MINUTE);
+        this.plan(MINUTE, { persist: true });
         if (!this.online) await this.setStatus(false, T.status.waitingBudget);
         return;
       }
       await this.failed(err, generation);
       return;
     }
+    if (this.inFlight === inFlight) this.inFlight = null;
     // Not applied: a pause, a new configuration or a halt came meanwhile,
     // and whoever did it planned what follows.
     if (!applied || !this.current(generation, epoch)) return;
@@ -483,7 +508,7 @@ export class UptimeRobotApp {
       if (!isBusy(err)) {
         this.retryDelay = Math.min(delay * 2, Math.max(interval, INTERVALS.RETRY_MAX_MS));
       }
-      this.plan(delay);
+      this.plan(delay, { persist: true });
     }
     await pausing;
     await this.publishTransports();

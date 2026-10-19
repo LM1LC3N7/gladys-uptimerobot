@@ -223,22 +223,79 @@ test('M4 (S6): a key pasted in "Monitors" never reaches the status nor the logs'
   assert.equal(fake.requests.length, 0);
 });
 
-test('M5: a restart keeps the planned reading time (bounded), unless forced', async () => {
+/** A first run, stopped with /data written, then a restart at `after` ms. */
+async function restart({ after, config = {}, fail } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), 'ur-review-'));
   const fake = createFakeUptimeRobot();
-  const first = await setup({ fake, dataDir });
+  const first = await setup({ fake, dataDir, config });
+  if (fail) {
+    fake.failures.push(fail);
+    await first.timers.advance(normalizeInterval(config));
+  }
   await first.app.stop();
   await first.app.store.settled();
-  const clock = { now: T0 + 60_000 };
-  const again = await setup({ fake, dataDir, clock });
-  assert.equal(reads(fake).length, 1, 'no reading at the restart');
-  assert.equal(again.app.nextRunAt, T0 + INTERVAL);
-  assert.match(again.gladys.fake.connectionStatus.message.en, /Reading in 4 min/);
-  await again.timers.advance(INTERVAL - 60_000);
-  assert.equal(reads(fake).length, 2, 'read at the planned time');
-  const ack = await again.gladys.fake.action('test_connection', {});
+  const before = reads(fake).length;
+  const again = await setup({ fake, dataDir, config, clock: { now: first.clock.now + after } });
+  return { ...again, before };
+}
+const normalizeInterval = (config) => Number(config.refresh_interval ?? 300) * 1000;
+
+test('R1: a restart after a successful reading reads at once and is connected', async () => {
+  const hourly = { refresh_interval: '3600' };
+  const r = await restart({ after: 120_000, config: hourly });
+  assert.equal(reads(r.fake).length - r.before, 1, 'read at once');
+  assert.equal(r.gladys.fake.connectionStatus.connected, true);
+  assert.equal(r.gladys.fake.discoveredDevices.length, 2);
+  assert.equal(r.app.nextRunAt, r.clock.now + 3600_000);
+  await r.app.store.settled();
+  const stored = JSON.parse(readFileSync(join(r.dataDir, STORE_FILE), 'utf8'));
+  assert.equal(stored.meta.nextReadAt, undefined, 'nothing kept after a success');
+});
+
+test('M5: a crash loop never reads within a minute of the last request', async () => {
+  const r = await restart({ after: 20_000 });
+  assert.equal(reads(r.fake).length - r.before, 0);
+  assert.match(r.gladys.fake.connectionStatus.message.en, /Reading in 1 min/);
+  await r.timers.advance(40_000);
+  assert.equal(reads(r.fake).length - r.before, 1);
+  assert.equal(r.gladys.fake.connectionStatus.connected, true);
+});
+
+test('M5: a restart after a failure keeps the planned wait (bounded), unless forced', async () => {
+  const r = await restart({ after: 60_000, fail: { error: 'unreachable' } });
+  assert.equal(reads(r.fake).length - r.before, 0, 'no reading at the restart');
+  assert.match(r.gladys.fake.connectionStatus.message.en, /Reading in 4 min/);
+  await r.timers.advance(INTERVAL - 60_000);
+  assert.equal(reads(r.fake).length - r.before, 1, 'read at the planned time');
+  // The planned wait is gone once read; the button reads at once anyway.
+  const ack = await r.gladys.fake.action('test_connection', {});
   assert.equal(ack.success, true);
-  assert.equal(reads(fake).length, 3, 'the button reads at once');
+  assert.equal(reads(r.fake).length - r.before, 2);
+});
+
+test('R2: a reconnection while a reading is in flight lets it finish, no extra request', async () => {
+  let gate = null;
+  const request = (f) => async (url, options) => {
+    if (gate) {
+      const g = gate;
+      gate = null;
+      await g;
+    }
+    return f.request(url, options);
+  };
+  const { gladys, fake, timers, app, clock } = await setup({ request });
+  let release;
+  gate = new Promise((resolve) => (release = resolve));
+  await timers.advance(INTERVAL); // the 5 min reading starts and hangs
+  const before = reads(fake).length;
+  await gladys.connect(); // Gladys reconnects meanwhile
+  await flush();
+  release();
+  await flush();
+  assert.equal(reads(fake).length, before + 1, 'only the hung request, no new one');
+  assert.equal(app.online, true);
+  assert.equal(app.nextRunAt - clock.now, INTERVAL, 'the reading planned the next one');
+  assert.equal(timers.pending.size, 1);
 });
 
 test('M6: the reason of a pause is kept across a restart', async () => {

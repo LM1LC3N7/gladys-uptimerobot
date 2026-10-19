@@ -39,6 +39,12 @@ up to date at the end of every milestone.
       persisted (M6); docs quote the real texts (M7); a reading begun before
       a command keeps the command's state (M8); 404 / 410 on v2 give "API v2
       may have been retired, update the integration" (M9).
+- [x] **Approval corrections** (2026-10-19): `nextReadAt` is persisted only
+      after a failure, a pause or a spent budget, and cleared by a successful
+      reading: a restart after a success reads at once (connected, Discovery),
+      at least a minute after the last request (`meta.lastRequestAt`) against
+      a crash loop (R1); a reconnection lets a reading in flight finish and
+      plan the next one (R2). Tests in `test/review.test.js`.
 - [ ] **Milestone 2 — real account** (a tester with UptimeRobot): record real
       answers as fixtures (key removed), fix what differs. To check first:
   - the answer to a wrong key (`stat: fail`, which `error.type`? HTTP 200 or
@@ -157,8 +163,11 @@ up to date at the end of every milestone.
   `loopHandle`, replaced by `plan()`; `failed()` halts and plans before its
   first await; a run whose epoch moved only records its pause. `nextRunAt`
   survives a reconnection (`resume()` plans `max(0, nextRunAt - now)`) and is
-  persisted as `meta.nextReadAt`, capped at one interval when read back; a
-  non-forced start waits for it (status "Restarted: ... Reading in N min").
+  persisted as `meta.nextReadAt` only after a failure, a pause or a spent
+  budget (cleared by a successful reading), capped at one interval when read
+  back; a non-forced start waits for it, and in any case until a minute after
+  `meta.lastRequestAt` (status "Restarted: ... Reading in N min"). A
+  reconnection during a reading of the same generation leaves it alone.
 - **Pause reason** (M6): `meta.pauseReason` = `busy` or `server:<status>`,
   so a restart during a pause shows the right status.
 - **Rate of states**: change-only (own cache + `publishChangedStates`), a

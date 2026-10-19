@@ -100,8 +100,8 @@ export const T = {
     restartWait: (delay) =>
       join(
         {
-          en: 'Restarted: the next reading of UptimeRobot keeps its planned time, to spare the request budget.',
-          fr: 'Redémarré : la prochaine lecture d’UptimeRobot garde son heure prévue, pour ménager le budget de requêtes.',
+          en: 'Restarted: the next reading of UptimeRobot waits (a failure, a pause or the last request less than a minute ago), to spare the request budget.',
+          fr: 'Redémarré : la prochaine lecture d’UptimeRobot attend (un échec, une pause ou la dernière requête il y a moins d’une minute), pour ménager le budget de requêtes.',
         },
         {
           en: `Reading in ${minutes(delay)} min.`,
