@@ -1,177 +1,171 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "UptimeRobot",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "Your UptimeRobot monitors: online or down, response time, uptime over 24 h, 7 and 30 days.",
+    "fr": "Vos moniteurs UptimeRobot : en ligne ou non, temps de réponse, disponibilité 24 h, 7 et 30 j."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-uptimerobot:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-uptimerobot/main/cover.png",
+  "categories": ["network", "services"],
+  "transports": ["cloud"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": { "en": "How it works", "fr": "Fonctionnement" },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Gladys reads your UptimeRobot monitors through the official UptimeRobot API, with an API key of your account. Each monitor becomes a Gladys device (Discovery tab): online or down, status, latest response time, uptime of the last 24 hours, 7 and 30 days, and its type and host (never the full URL). Two scene triggers: \"Monitor down\" and \"Monitor back up\". Use the read-only API key: on uptimerobot.com, Integrations & API, API, then create the \"Read-only API key\". Unofficial integration, not affiliated with UptimeRobot.",
+        "fr": "Gladys lit vos moniteurs UptimeRobot par l'API officielle d'UptimeRobot, avec une clé d'API de votre compte. Chaque moniteur devient un appareil Gladys (onglet Découverte) : en ligne ou hors ligne, état, dernier temps de réponse, disponibilité des dernières 24 heures, 7 et 30 jours, et son type et son hôte (jamais l'URL complète). Deux déclencheurs de scène : « Moniteur hors ligne » et « Moniteur rétabli ». Utilisez la clé en lecture seule : sur uptimerobot.com, Integrations & API, API, puis créez la « Read-only API key ». Intégration non officielle, sans lien avec UptimeRobot."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://dashboard.uptimerobot.com/integrations",
+          "label": {
+            "en": "Your UptimeRobot API keys",
+            "fr": "Vos clés d'API UptimeRobot"
+          }
+        },
+        {
+          "url": "https://uptimerobot.com/api/",
+          "label": { "en": "UptimeRobot API", "fr": "API UptimeRobot" }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
+      "key": "api_key",
+      "type": "secret",
+      "label": { "en": "API key", "fr": "Clé d'API" },
       "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+        "en": "The read-only API key is recommended (it can only read). Pause and resume need the main API key. Kept by Gladys in its database, never shown again, sent only to api.uptimerobot.com, in the body of the requests.",
+        "fr": "La clé d'API en lecture seule est recommandée (elle ne peut que lire). La pause et la reprise demandent la clé d'API principale. Gardée par Gladys dans sa base, jamais réaffichée, envoyée seulement à api.uptimerobot.com, dans le corps des requêtes."
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
+      "placeholder": { "en": "ur123456-...", "fr": "ur123456-..." },
+      "required": true
     },
     {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
+      "key": "monitors",
+      "type": "string",
+      "label": { "en": "Monitors (optional)", "fr": "Moniteurs (facultatif)" },
       "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
+        "en": "Ids of the monitors to follow (the digits at the end of the address of a monitor on the dashboard), separated by commas, 50 at most. Empty: every monitor of the account, 200 at most.",
+        "fr": "Identifiants des moniteurs à suivre (les chiffres à la fin de l'adresse d'un moniteur sur le tableau de bord), séparés par des virgules, 50 au plus. Vide : tous les moniteurs du compte, 200 au plus."
       },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
+      "placeholder": { "en": "e.g. 777749809, 777712827", "fr": "ex. 777749809, 777712827" },
+      "required": false
     },
     {
-      "key": "unit",
+      "key": "refresh_interval",
       "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
-      "required": false,
-      "default": "celsius",
+      "label": { "en": "Refresh", "fr": "Rafraîchissement" },
+      "description": {
+        "en": "How often Gladys reads UptimeRobot (one request per 50 monitors). The free plan checks every 5 minutes and admits 10 requests per minute: reading more often only helps on a paid plan.",
+        "fr": "À quel rythme Gladys lit UptimeRobot (une requête par tranche de 50 moniteurs). L'offre gratuite vérifie toutes les 5 minutes et admet 10 requêtes par minute : lire plus souvent ne sert qu'avec une offre payante."
+      },
+      "required": true,
+      "default": "300",
       "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
+        { "value": "60", "label": { "en": "Every minute", "fr": "Toutes les minutes" } },
+        { "value": "120", "label": { "en": "Every 2 minutes", "fr": "Toutes les 2 minutes" } },
+        { "value": "300", "label": { "en": "Every 5 minutes", "fr": "Toutes les 5 minutes" } },
+        { "value": "600", "label": { "en": "Every 10 minutes", "fr": "Toutes les 10 minutes" } },
+        { "value": "900", "label": { "en": "Every 15 minutes", "fr": "Toutes les 15 minutes" } },
+        { "value": "1800", "label": { "en": "Every 30 minutes", "fr": "Toutes les 30 minutes" } },
+        { "value": "3600", "label": { "en": "Every hour", "fr": "Toutes les heures" } }
       ]
     },
     {
-      "key": "poll_frequency",
-      "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "key": "commands_section",
+      "type": "section",
+      "label": { "en": "Pause and resume", "fr": "Pause et reprise" },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "By default Gladys only reads. Once allowed below, each monitor gets two buttons, \"Pause monitoring\" and \"Resume monitoring\" (never a switch: no voice assistant nor \"turn everything off\" can touch them). A paused monitor no longer alerts you: it needs the main API key, a read-only key is refused by UptimeRobot.",
+        "fr": "Par défaut Gladys ne fait que lire. Une fois autorisé ci-dessous, chaque moniteur reçoit deux boutons, « Pause monitoring » et « Resume monitoring » (jamais un interrupteur : ni assistant vocal ni « tout éteindre » ne peut y toucher). Un moniteur en pause ne vous alerte plus : il faut la clé d'API principale, une clé en lecture seule est refusée par UptimeRobot."
+      }
+    },
+    {
+      "key": "allow_pause_resume",
+      "type": "boolean",
+      "label": {
+        "en": "Allow pausing and resuming monitors",
+        "fr": "Autoriser la pause et la reprise des moniteurs"
       },
       "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "default": false
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
+      "key": "test_connection",
+      "label": { "en": "Test the connection", "fr": "Tester la connexion" },
+      "description": {
+        "en": "Connects to UptimeRobot (even after a refused key or a pause) and lists the monitors.",
+        "fr": "Se connecte à UptimeRobot (même après une clé refusée ou une pause) et liste les moniteurs."
+      },
       "timeout_seconds": 30
-    },
-    {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
     }
   ],
   "scene_triggers": [
     {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
+      "key": "monitor_down",
+      "label": { "en": "Monitor down", "fr": "Moniteur hors ligne" },
       "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
+        "en": "UptimeRobot confirmed a monitor down, after it was up at the previous reading. Never on the first reading nor after a long gap. The scene starts up to one refresh interval after.",
+        "fr": "UptimeRobot a confirmé un moniteur hors ligne, alors qu'il était en ligne à la lecture précédente. Jamais à la première lecture ni après un long trou. La scène démarre jusqu'à un intervalle de rafraîchissement après."
       },
       "fields": [
         {
-          "key": "device",
+          "key": "monitor",
           "type": "select",
           "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
+          "required": false,
+          "label": { "en": "Monitor (empty: any)", "fr": "Moniteur (vide : tous)" }
         }
       ],
       "variables": [
         {
-          "key": "target",
+          "key": "monitor_name",
           "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
+          "label": { "en": "Monitor name", "fr": "Nom du moniteur" }
+        },
+        {
+          "key": "monitor_type",
+          "type": "string",
+          "label": { "en": "Monitor type", "fr": "Type du moniteur" }
         }
       ]
-    }
-  ],
-  "scene_actions": [
+    },
     {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
+      "key": "monitor_up",
+      "label": { "en": "Monitor back up", "fr": "Moniteur rétabli" },
       "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
+        "en": "UptimeRobot sees a monitor up again, after it was confirmed down at the previous reading. Never on the first reading, after a long gap, nor after a resume.",
+        "fr": "UptimeRobot voit de nouveau en ligne un moniteur confirmé hors ligne à la lecture précédente. Jamais à la première lecture, après un long trou, ni après une reprise."
       },
-      "timeout_seconds": 15,
       "fields": [
         {
-          "key": "device",
+          "key": "monitor",
           "type": "select",
           "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
+          "required": false,
+          "label": { "en": "Monitor (empty: any)", "fr": "Moniteur (vide : tous)" }
         }
       ],
-      "outputs": [
+      "variables": [
         {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
+          "key": "monitor_name",
+          "type": "string",
+          "label": { "en": "Monitor name", "fr": "Nom du moniteur" }
+        },
+        {
+          "key": "monitor_type",
+          "type": "string",
+          "label": { "en": "Monitor type", "fr": "Type du moniteur" }
         }
       ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
     }
   ]
 }
