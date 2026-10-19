@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-19
+
 ### Added
 
 - UptimeRobot monitors through the official API (v2): one Gladys device per
@@ -26,4 +28,5 @@ the notes of the version's GitHub Release.
   and a restart; clear statuses when the request budget is spent and when
   the API v2 answers 404 / 410.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-uptimerobot/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-uptimerobot/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-uptimerobot/releases/tag/v0.1.1

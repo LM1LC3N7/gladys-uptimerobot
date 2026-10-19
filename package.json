@@ -1,6 +1,6 @@
 {
   "name": "gladys-uptimerobot",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant external integration for UptimeRobot: online state, response time and uptime (24 h, 7 and 30 days) of each monitor, scene triggers, optional pause and resume, through the official UptimeRobot API. Unofficial, not affiliated with UptimeRobot.",
   "type": "module",
